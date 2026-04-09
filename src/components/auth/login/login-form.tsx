@@ -1,3 +1,8 @@
+"use client";
+
+import { useState } from "react";
+import { signIn } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +16,42 @@ import {
 import { Input } from "@/components/ui/input";
 
 export function LoginForm({ className, ...props }: React.ComponentProps<"div">) {
+    const router = useRouter();
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [error, setError] = useState("");
+    const [loading, setLoading] = useState(false);
+
+    async function handleSubmit(e: React.FormEvent) {
+        e.preventDefault();
+        setError("");
+        setLoading(true);
+
+        const res = await signIn("credentials", {
+            email,
+            password,
+            redirect: false,
+        });
+
+        setLoading(false);
+
+        if (res?.error) {
+            setError("Invalid email or password.");
+            return;
+        }
+
+        router.push("/dashboard");
+        router.refresh();
+    }
+
+    async function handleGoogle() {
+        await signIn("google", { callbackUrl: "/dashboard" });
+    }
+
+    async function handleEnvato() {
+        await signIn("envato", { callbackUrl: "/dashboard" });
+    }
+
     return (
         <div className={cn("flex flex-col gap-6", className)} {...props}>
             <Card>
@@ -19,10 +60,10 @@ export function LoginForm({ className, ...props }: React.ComponentProps<"div">) 
                     <CardDescription>Login with your Envato or Google account</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <form>
+                    <form onSubmit={handleSubmit}>
                         <FieldGroup>
-                            <Field>
-                                <Button variant="outline" type="button">
+                            <Field className="grid grid-cols-2 gap-4">
+                                <Button variant="outline" type="button" onClick={handleEnvato}>
                                     <svg
                                         width="16"
                                         height="16"
@@ -41,9 +82,9 @@ export function LoginForm({ className, ...props }: React.ComponentProps<"div">) 
                                             fill="#191919"
                                         />
                                     </svg>
-                                    Login with Envato
+                                    Envato
                                 </Button>
-                                <Button variant="outline" type="button">
+                                <Button variant="outline" type="button" onClick={handleGoogle}>
                                     <svg
                                         width="16"
                                         height="16"
@@ -67,39 +108,62 @@ export function LoginForm({ className, ...props }: React.ComponentProps<"div">) 
                                             d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
                                         />
                                     </svg>
-                                    Login with Google
+                                    Google
                                 </Button>
                             </Field>
+
                             <FieldSeparator className="*:data-[slot=field-separator-content]:bg-card">
                                 Or continue with
                             </FieldSeparator>
+
+                            {error && (
+                                <p className="text-destructive rounded-lg bg-red-500/10 px-3 py-2 text-sm">
+                                    {error}
+                                </p>
+                            )}
+
                             <Field>
                                 <FieldLabel htmlFor="email">Email</FieldLabel>
                                 <Input
                                     id="email"
                                     type="email"
                                     placeholder="m@example.com"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
                                     required
                                 />
                             </Field>
+
                             <Field>
                                 <div className="flex items-center">
                                     <FieldLabel htmlFor="password">Password</FieldLabel>
                                     <a
-                                        href="#"
+                                        href="/forgot-password"
                                         className="ml-auto text-sm underline-offset-4 hover:underline"
                                     >
                                         Forgot your password?
                                     </a>
                                 </div>
-                                <Input id="password" type="password" required />
+                                <Input
+                                    id="password"
+                                    type="password"
+                                    placeholder="Enter your password"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    required
+                                />
                             </Field>
+
                             <Field>
-                                <Button type="submit" className="bg-primary">
-                                    Login
+                                <Button
+                                    type="submit"
+                                    className="w-full cursor-pointer"
+                                    disabled={loading}
+                                >
+                                    {loading ? "Logging in..." : "Login"}
                                 </Button>
                                 <FieldDescription className="text-center">
-                                    Don&apos;t have an account? <a href="#">Sign up</a>
+                                    Don&apos;t have an account? <a href="/register">Sign up</a>
                                 </FieldDescription>
                             </Field>
                         </FieldGroup>

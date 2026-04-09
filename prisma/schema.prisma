@@ -1,0 +1,350 @@
+// ─────────────────────────────────────────────────────────
+// Evocave Help — Prisma Schema
+// ─────────────────────────────────────────────────────────
+
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "postgresql"
+}
+
+// ─── Enums ───────────────────────────────────────────────
+
+enum Role {
+    superadmin
+    admin
+    support
+    technical
+    user
+}
+
+enum TicketStatus {
+    OPEN
+    IN_PROGRESS
+    AWAITING_CUSTOMER
+    AWAITING_AGENT
+    RESOLVED
+    CLOSED
+}
+
+enum Priority {
+    LOW
+    MEDIUM
+    HIGH
+    URGENT
+}
+
+enum AnnouncementType {
+    update
+    maintenance
+    news
+    security
+}
+
+enum ActivityType {
+    ticket_created
+    ticket_assigned
+    ticket_status_changed
+    ticket_priority_changed
+    ticket_label_added
+    ticket_label_removed
+    reply_sent
+    note_added
+    ticket_closed
+    ticket_reopened
+}
+
+enum NotificationType {
+    ticket_reply
+    status_change
+    announcement
+}
+
+enum AuthProvider {
+    email
+    google
+    envato
+}
+
+// ─── User ────────────────────────────────────────────────
+
+model User {
+    id             String       @id @default(cuid())
+    name           String
+    email          String       @unique
+    password       String? // null kalau OAuth
+    avatarUrl      String?
+    role           Role         @default(user)
+    provider       AuthProvider @default(email)
+    envatoToken    String? // access token Envato OAuth, encrypted
+    envatoUsername String?
+    emailVerified  Boolean      @default(false)
+    createdAt      DateTime     @default(now())
+    updatedAt      DateTime     @updatedAt
+
+    // Relations
+    tickets         Ticket[]       @relation("CustomerTickets")
+    assignedTickets Ticket[]       @relation("AssignedTickets")
+    messages        Message[]
+    activityLogs    ActivityLog[]
+    notifications   Notification[]
+    userProducts    UserProduct[]
+    accounts        Account[] // NextAuth
+
+    @@map("users")
+}
+
+// ─── NextAuth Account ─────────────────────────────────────
+// Untuk simpan OAuth provider data (Google, Envato)
+
+model Account {
+    id                String  @id @default(cuid())
+    userId            String
+    type              String
+    provider          String
+    providerAccountId String
+    refresh_token     String?
+    access_token      String?
+    expires_at        Int?
+    token_type        String?
+    scope             String?
+    id_token          String?
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@unique([provider, providerAccountId])
+    @@map("accounts")
+}
+
+// ─── Product ─────────────────────────────────────────────
+// Produk Evocave yang dijual di Envato
+
+model Product {
+    id           String   @id @default(cuid())
+    envatoItemId String   @unique // ID item di Envato (56240617, dll)
+    name         String
+    slug         String   @unique
+    thumbnailUrl String?
+    landscapeUrl String?
+    previewUrl   String?
+    createdAt    DateTime @default(now())
+    updatedAt    DateTime @updatedAt
+
+    // Relations
+    userProducts UserProduct[]
+    tickets      Ticket[]
+
+    @@map("products")
+}
+
+// ─── UserProduct ─────────────────────────────────────────
+// Junction table: User <-> Product (many-to-many)
+
+model UserProduct {
+    id             String    @id @default(cuid())
+    userId         String
+    productId      String
+    purchaseCode   String    @unique // Envato purchase code
+    licenseType    String    @default("Regular License")
+    supportedUntil DateTime? // null = lifetime support
+    envatoSaleId   String? // sale ID dari Envato
+    verifiedAt     DateTime  @default(now())
+    createdAt      DateTime  @default(now())
+
+    user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+    product Product @relation(fields: [productId], references: [id])
+
+    @@map("user_products")
+}
+
+// ─── Ticket ──────────────────────────────────────────────
+
+model Ticket {
+    id              String       @id @default(cuid())
+    referenceNumber String       @unique // EVO-2026-001
+    subject         String
+    status          TicketStatus @default(OPEN)
+    priority        Priority     @default(MEDIUM)
+    category        String       @default("general")
+
+    // Foreign keys
+    customerId   String
+    productId    String
+    assignedToId String?
+
+    createdAt  DateTime  @default(now())
+    updatedAt  DateTime  @updatedAt
+    resolvedAt DateTime?
+    closedAt   DateTime?
+
+    // Relations
+    customer   User    @relation("CustomerTickets", fields: [customerId], references: [id])
+    product    Product @relation(fields: [productId], references: [id])
+    assignedTo User?   @relation("AssignedTickets", fields: [assignedToId], references: [id])
+
+    messages      Message[]
+    attachments   Attachment[]
+    activityLogs  ActivityLog[]
+    notifications Notification[]
+    labels        TicketLabel[]
+
+    @@map("tickets")
+}
+
+// ─── Message ─────────────────────────────────────────────
+
+model Message {
+    id          String   @id @default(cuid())
+    ticketId    String
+    authorId    String
+    content     String
+    isFromAgent Boolean  @default(false)
+    isNote      Boolean  @default(false) // internal note
+    createdAt   DateTime @default(now())
+
+    ticket      Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+    author      User         @relation(fields: [authorId], references: [id])
+    attachments Attachment[]
+
+    @@map("messages")
+}
+
+// ─── Attachment ───────────────────────────────────────────
+
+model Attachment {
+    id         String   @id @default(cuid())
+    ticketId   String
+    messageId  String? // null kalau diupload saat buat tiket (sebelum ada pesan)
+    fileName   String
+    fileSize   Int // bytes
+    mimeType   String
+    r2Key      String   @unique // key di Cloudflare R2
+    r2Url      String // public URL
+    uploadedBy String
+    createdAt  DateTime @default(now())
+
+    ticket  Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+    message Message? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+    @@map("attachments")
+}
+
+// ─── Label ───────────────────────────────────────────────
+
+model Label {
+    id          String   @id @default(cuid())
+    name        String   @unique
+    color       String   @default("blue")
+    description String?
+    createdAt   DateTime @default(now())
+
+    tickets TicketLabel[]
+
+    @@map("labels")
+}
+
+// Junction: Ticket <-> Label
+
+model TicketLabel {
+    ticketId String
+    labelId  String
+
+    ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+    label  Label  @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+    @@id([ticketId, labelId])
+    @@map("ticket_labels")
+}
+
+// ─── Canned Response ─────────────────────────────────────
+
+model CannedResponse {
+    id        String   @id @default(cuid())
+    title     String
+    shortcut  String?  @unique // e.g. "/thanks"
+    category  String   @default("General")
+    content   String
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@map("canned_responses")
+}
+
+// ─── Announcement ────────────────────────────────────────
+
+model Announcement {
+    id        String           @id @default(cuid())
+    title     String
+    excerpt   String
+    content   String
+    type      AnnouncementType @default(news)
+    productId String? // null = semua produk
+    published Boolean          @default(false)
+    createdAt DateTime         @default(now())
+    updatedAt DateTime         @updatedAt
+
+    @@map("announcements")
+}
+
+// ─── Activity Log ─────────────────────────────────────────
+// Audit trail semua perubahan pada tiket
+
+model ActivityLog {
+    id        String       @id @default(cuid())
+    ticketId  String
+    actorId   String
+    type      ActivityType
+    text      String // deskripsi human-readable, e.g. "Changed status from Open → In Progress"
+    meta      Json? // data tambahan, e.g. { "from": "OPEN", "to": "IN_PROGRESS" }
+    createdAt DateTime     @default(now())
+
+    ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+    actor  User   @relation(fields: [actorId], references: [id])
+
+    @@map("activity_logs")
+}
+
+// ─── Notification ────────────────────────────────────────
+
+model Notification {
+    id        String           @id @default(cuid())
+    userId    String
+    ticketId  String? // null kalau announcement
+    type      NotificationType
+    title     String
+    body      String
+    href      String
+    read      Boolean          @default(false)
+    createdAt DateTime         @default(now())
+
+    user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+    ticket Ticket? @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+
+    @@map("notifications")
+}
+
+// ─── Ticket Counter ───────────────────────────────────────
+// Untuk generate reference number EVO-{YEAR}-{NUMBER}
+
+model TicketCounter {
+    year  Int @id
+    count Int @default(0)
+
+    @@map("ticket_counters")
+}
+
+// ─── Verification Token ───────────────────────────────────
+// Untuk email verification dan password reset
+
+model VerificationToken {
+    id        String   @id @default(cuid())
+    email     String
+    token     String   @unique
+    type      String // "email_verify" | "password_reset"
+    expiresAt DateTime
+    createdAt DateTime @default(now())
+
+    @@map("verification_tokens")
+}
