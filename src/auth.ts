@@ -6,8 +6,57 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import EnvatoProvider from "@/lib/envato-provider";
 
+// ── Custom Adapter — map image -> avatarUrl ───────────────
+function CustomPrismaAdapter() {
+    const adapter = PrismaAdapter(prisma);
+
+    function toAdapterUser(user: any) {
+        return {
+            ...user,
+            image: user.avatarUrl ?? null,
+            emailVerified: user.emailVerified ? new Date() : null,
+        };
+    }
+
+    return {
+        ...adapter,
+        createUser: async (data: any) => {
+            const { image, emailVerified, ...rest } = data;
+            const user = await prisma.user.create({
+                data: {
+                    ...rest,
+                    avatarUrl: image ?? null,
+                    emailVerified: !!emailVerified,
+                    provider: rest.provider ?? "email",
+                },
+            });
+            return toAdapterUser(user);
+        },
+        updateUser: async (data: any) => {
+            const { image, emailVerified, ...rest } = data;
+            const user = await prisma.user.update({
+                where: { id: rest.id },
+                data: {
+                    ...rest,
+                    ...(image !== undefined && { avatarUrl: image }),
+                    ...(emailVerified !== undefined && { emailVerified: !!emailVerified }),
+                },
+            });
+            return toAdapterUser(user);
+        },
+        getUser: async (id: string) => {
+            const user = await prisma.user.findUnique({ where: { id } });
+            return user ? toAdapterUser(user) : null;
+        },
+        getUserByEmail: async (email: string) => {
+            const user = await prisma.user.findUnique({ where: { email } });
+            return user ? toAdapterUser(user) : null;
+        },
+    };
+}
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
-    adapter: PrismaAdapter(prisma),
+    adapter: CustomPrismaAdapter(),
     session: { strategy: "jwt" },
     providers: [
         // ── Google OAuth ──────────────────────────────
@@ -57,14 +106,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         async jwt({ token, user, account }) {
             if (user) {
                 token.id = user.id;
-                token.role = (user as any).role ?? "USER";
+                token.role = (user as any).role ?? "user";
             }
-
-            // Kalau login via Envato — simpan access token untuk sync produk
             if (account?.provider === "envato") {
                 token.envatoAccessToken = account.access_token;
             }
-
             return token;
         },
 
@@ -77,7 +123,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         },
 
         async signIn({ user, account, profile }) {
-            // Kalau login via Envato — sync produk yang dibeli
             if (account?.provider === "envato" && account.access_token) {
                 try {
                     await syncEnvatoProducts(
@@ -87,7 +132,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
                     );
                 } catch (err) {
                     console.error("Failed to sync Envato products:", err);
-                    // Tidak block login meski sync gagal
                 }
             }
             return true;
@@ -101,30 +145,20 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
 // ── Sync produk Envato setelah login ─────────────────────
 async function syncEnvatoProducts(userId: string, accessToken: string, envatoUsername?: string) {
-    // Fetch semua pembelian produk Evocave dari Envato
     const res = await fetch(
         "https://api.envato.com/v3/market/buyer/purchases?filter_by=app_creator_items",
-        {
-            headers: { Authorization: `Bearer ${accessToken}` },
-        },
+        { headers: { Authorization: `Bearer ${accessToken}` } },
     );
 
     if (!res.ok) return;
     const data = await res.json();
     const purchases = data.purchases ?? [];
 
-    // Simpan envatoUsername ke user
+    // Update envatoUsername
     if (envatoUsername) {
-        await prisma.user.upsert({
+        await prisma.user.update({
             where: { id: userId },
-            update: { envatoUsername },
-            create: {
-                id: userId,
-                name: envatoUsername,
-                email: "",
-                envatoUsername,
-                provider: "envato",
-            },
+            data: { envatoUsername },
         });
     }
 
@@ -133,14 +167,12 @@ async function syncEnvatoProducts(userId: string, accessToken: string, envatoUse
         const envatoItemId = purchase.item?.id;
         if (!envatoItemId) continue;
 
-        // Cek apakah produk ada di database kita
         const product = await prisma.product.findUnique({
-            where: { envatoItemId },
+            where: { envatoItemId: String(envatoItemId) },
         });
 
-        if (!product) continue; // Skip produk yang bukan milik Evocave
+        if (!product) continue;
 
-        // Upsert UserProduct
         await prisma.userProduct.upsert({
             where: { purchaseCode: purchase.code },
             update: {
