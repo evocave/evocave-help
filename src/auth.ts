@@ -115,9 +115,16 @@ async function syncEnvatoProducts(userId: string, accessToken: string, envatoUse
 
     // Simpan envatoUsername ke user
     if (envatoUsername) {
-        await prisma.user.update({
+        await prisma.user.upsert({
             where: { id: userId },
-            data: { envatoUsername },
+            update: { envatoUsername },
+            create: {
+                id: userId,
+                name: envatoUsername,
+                email: "",
+                envatoUsername,
+                provider: "envato",
+            },
         });
     }
 
