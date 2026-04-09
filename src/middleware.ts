@@ -1,22 +1,28 @@
-import { auth } from "@/auth";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { getToken } from "next-auth/jwt";
 
-export default auth((req) => {
+export async function middleware(req: NextRequest) {
     const { pathname } = req.nextUrl;
-    const isLoggedIn = !!req.auth;
-    const userRole = req.auth?.user?.role;
+
+    const token = await getToken({
+        req,
+        secret: process.env.AUTH_SECRET,
+    });
+
+    const isLoggedIn = !!token;
+    const userRole = token?.role as string | undefined;
 
     // Protect /dashboard
     if (pathname.startsWith("/dashboard") && !isLoggedIn) {
         return NextResponse.redirect(new URL("/login", req.url));
     }
 
-    // Protect /admin — hanya role admin ke atas
+    // Protect /admin
     if (pathname.startsWith("/admin")) {
         if (!isLoggedIn) {
             return NextResponse.redirect(new URL("/login", req.url));
         }
-        const adminRoles = ["ADMIN", "SUPERADMIN", "SUPPORT", "TECHNICAL"];
+        const adminRoles = ["admin", "superadmin", "support", "technical"];
         if (!adminRoles.includes(userRole ?? "")) {
             return NextResponse.redirect(new URL("/dashboard", req.url));
         }
@@ -28,7 +34,7 @@ export default auth((req) => {
     }
 
     return NextResponse.next();
-});
+}
 
 export const config = {
     matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
