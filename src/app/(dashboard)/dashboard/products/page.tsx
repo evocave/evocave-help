@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Plus, X } from "lucide-react";
 
@@ -12,63 +12,10 @@ interface Product {
     thumbnailUrl: string;
     landscapeUrl: string;
     purchaseCode: string;
-    purchaseDate: string;
+    createdAt: string;
     supportedUntil: string | null;
-    license: string;
-    envatoUrl: string;
+    licenseType: string;
 }
-
-// ─── Mock Data ───────────────────────────────────────────
-const mockProducts: Product[] = [
-    {
-        id: "p1",
-        envatoItemId: 56240617,
-        name: "Solarion - Solar & Green Renewable Energy Elementor Template Kit",
-        thumbnailUrl: "https://s3.envato.com/files/778140542/thumbnail-solarion.png",
-        landscapeUrl: "https://s3.envato.com/files/778140603/cover-solarion.jpg",
-        purchaseCode: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-        purchaseDate: "2026-04-04T01:03:54+11:00",
-        supportedUntil: null,
-        license: "Regular License",
-        envatoUrl: "https://themeforest.net/item/solarion/56240617",
-    },
-    {
-        id: "p2",
-        envatoItemId: 56557806,
-        name: "Coworkly - Coworking Creative Space Elementor Template Kit",
-        thumbnailUrl: "https://s3.envato.com/files/778143115/thumbnail-coworkly.png",
-        landscapeUrl: "https://s3.envato.com/files/778143196/cover-coworkly.jpg",
-        purchaseCode: "x9y8z7w6-v5u4-3210-wxyz-ab9876543210",
-        purchaseDate: "2025-12-11T04:40:15+11:00",
-        supportedUntil: null,
-        license: "Regular License",
-        envatoUrl: "https://themeforest.net/item/coworkly/56557806",
-    },
-    {
-        id: "p3",
-        envatoItemId: 56637738,
-        name: "Elecfix - Electrician & Electrical Services Elementor Template Kit",
-        thumbnailUrl: "https://s3.envato.com/files/778145153/thumbnail-elecfix.png",
-        landscapeUrl: "https://s3.envato.com/files/778145205/cover-elecfix.jpg",
-        purchaseCode: "f3e2d1c0-b9a8-7654-fedc-ba9876543210",
-        purchaseDate: "2026-04-04T00:46:25+11:00",
-        supportedUntil: null,
-        license: "Regular License",
-        envatoUrl: "https://themeforest.net/item/elecfix/56637738",
-    },
-    {
-        id: "p4",
-        envatoItemId: 56461819,
-        name: "SteelForge - Steel Factory & Industrial Plant Manufacturing Elementor Template Kit",
-        thumbnailUrl: "https://s3.envato.com/files/778141819/thumbnail-steelforge.png",
-        landscapeUrl: "https://s3.envato.com/files/778141871/cover-steelforge.jpg",
-        purchaseCode: "c1d2e3f4-a5b6-7890-cdef-ab1234567890",
-        purchaseDate: "2026-01-31T20:25:05+11:00",
-        supportedUntil: null,
-        license: "Regular License",
-        envatoUrl: "https://themeforest.net/item/steelforge/56461819",
-    },
-];
 
 // ─── Helpers ─────────────────────────────────────────────
 function maskCode(code: string) {
@@ -94,40 +41,79 @@ function AddProductModal({
 }) {
     const [code, setCode] = useState("");
     const [verifying, setVerifying] = useState(false);
-    const [result, setResult] = useState<{ valid: boolean; product?: Product } | null>(null);
+    const [adding, setAdding] = useState(false);
+    const [error, setError] = useState("");
+    const [result, setResult] = useState<{
+        valid: boolean;
+        product?: {
+            name: string;
+            thumbnailUrl: string;
+            landscapeUrl?: string;
+            licenseType: string;
+            supportedUntil: string | null;
+        };
+        purchaseCode?: string;
+        productId?: string;
+    } | null>(null);
 
     async function handleVerify() {
-        if (!code.trim()) return;
+        if (!code.trim() || verifying) return;
         setVerifying(true);
+        setError("");
         setResult(null);
-        // TODO: POST /api/envato/verify { purchaseCode: code }
-        await new Promise((r) => setTimeout(r, 1500));
+
+        const res = await fetch("/api/products/verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ purchaseCode: code.trim() }),
+        });
+
+        const data = await res.json();
+        setVerifying(false);
+
+        if (!res.ok) {
+            setError(data.error ?? "Verification failed");
+            setResult({ valid: false });
+            return;
+        }
+
         setResult({
             valid: true,
-            product: {
-                id: "p-new",
-                envatoItemId: 56240617,
-                name: "Solarion - Solar & Green Renewable Energy Elementor Template Kit",
-                thumbnailUrl: "https://s3.envato.com/files/778140542/thumbnail-solarion.png",
-                landscapeUrl: "https://s3.envato.com/files/778140603/cover-solarion.jpg",
-                purchaseCode: code,
-                purchaseDate: new Date().toISOString(),
-                supportedUntil: null,
-                license: "Regular License",
-                envatoUrl: "https://themeforest.net/item/solarion/56240617",
-            },
+            product: data.product,
+            purchaseCode: code.trim(),
+            productId: data.product.id,
         });
-        setVerifying(false);
+    }
+
+    async function handleAdd() {
+        if (!result?.valid || !result.product || adding) return;
+        setAdding(true);
+
+        // Data sudah disimpan saat verify, tinggal update UI
+        onAdd({
+            id: result.productId!,
+            envatoItemId: 0,
+            name: result.product.name,
+            thumbnailUrl: result.product.thumbnailUrl,
+            landscapeUrl: result.product.landscapeUrl ?? "",
+            purchaseCode: result.purchaseCode!,
+            createdAt: new Date().toISOString(),
+            supportedUntil: result.product.supportedUntil,
+            licenseType: result.product.licenseType,
+        });
+
+        setAdding(false);
+        onClose();
     }
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-            <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+            <div className="bg-popover border-border w-full max-w-md rounded-2xl border p-6">
                 <div className="mb-5 flex items-center justify-between">
-                    <h2 className="text-base font-semibold text-white">Add New Product</h2>
+                    <h2 className="text-foreground text-base font-semibold">Add New Product</h2>
                     <button
                         onClick={onClose}
-                        className="text-zinc-600 transition-colors hover:text-zinc-300"
+                        className="text-muted-foreground hover:text-foreground transition-colors"
                     >
                         <X className="h-5 w-5" />
                     </button>
@@ -135,7 +121,7 @@ function AddProductModal({
 
                 <div className="space-y-4">
                     <div>
-                        <label className="mb-2 block text-sm font-medium text-zinc-300">
+                        <label className="text-foreground mb-2 block text-sm font-medium">
                             Purchase Code
                         </label>
                         <div className="flex gap-2">
@@ -146,8 +132,9 @@ function AddProductModal({
                                 onChange={(e) => {
                                     setCode(e.target.value);
                                     setResult(null);
+                                    setError("");
                                 }}
-                                className="flex-1 rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-2.5 font-mono text-sm text-zinc-200 placeholder-zinc-600 transition-colors focus:border-zinc-600 focus:outline-none"
+                                className="bg-secondary/20 border-border text-foreground placeholder:text-muted-foreground/50 focus:border-ring/70 flex-1 rounded-lg border px-4 py-2.5 font-mono text-sm transition-colors focus:outline-none"
                             />
                             <button
                                 onClick={handleVerify}
@@ -155,7 +142,7 @@ function AddProductModal({
                                 className={`rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${
                                     result?.valid
                                         ? "border border-emerald-500/20 bg-emerald-500/20 text-emerald-400"
-                                        : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                        : "bg-secondary/40 text-foreground hover:bg-secondary/60 disabled:cursor-not-allowed disabled:opacity-50"
                                 }`}
                             >
                                 {verifying ? (
@@ -185,26 +172,30 @@ function AddProductModal({
                                 )}
                             </button>
                         </div>
-                        <p className="mt-1.5 text-xs text-zinc-600">
+                        <p className="text-muted-foreground mt-1.5 text-xs">
                             Find your purchase code on{" "}
                             <a
-                                href="https://codecanyon.net/downloads"
+                                href="https://themeforest.net/downloads"
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-blue-500 hover:text-blue-400"
+                                className="text-blue-400 hover:text-blue-300"
                             >
                                 Envato Downloads
                             </a>
                         </p>
                     </div>
 
+                    {error && <p className="text-xs text-red-400">{error}</p>}
+
                     {result?.valid && result.product && (
                         <div className="overflow-hidden rounded-xl border border-emerald-500/20 bg-emerald-500/5">
-                            <img
-                                src={result.product.landscapeUrl}
-                                alt=""
-                                className="h-24 w-full object-cover"
-                            />
+                            {result.product.landscapeUrl && (
+                                <img
+                                    src={result.product.landscapeUrl}
+                                    alt=""
+                                    className="h-24 w-full object-cover"
+                                />
+                            )}
                             <div className="flex items-center gap-3 p-3">
                                 <img
                                     src={result.product.thumbnailUrl}
@@ -212,18 +203,22 @@ function AddProductModal({
                                     className="h-9 w-9 shrink-0 rounded-lg object-cover"
                                 />
                                 <div className="min-w-0 flex-1">
-                                    <p className="truncate text-sm font-medium text-zinc-200">
+                                    <p className="text-foreground truncate text-sm font-medium">
                                         {result.product.name}
                                     </p>
-                                    <p className="text-xs text-zinc-500">
-                                        {result.product.license} · Lifetime support
+                                    <p className="text-muted-foreground text-xs">
+                                        {result.product.licenseType} ·{" "}
+                                        {result.product.supportedUntil
+                                            ? "Support until " +
+                                              formatDate(result.product.supportedUntil)
+                                            : "Lifetime support"}
                                     </p>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {result?.valid === false && (
+                    {result?.valid === false && !error && (
                         <p className="text-xs text-red-400">
                             Purchase code not found or not an Evocave product.
                         </p>
@@ -232,16 +227,16 @@ function AddProductModal({
                     <div className="flex gap-2 pt-1">
                         <button
                             onClick={onClose}
-                            className="flex-1 rounded-lg border border-zinc-800 py-2.5 text-sm text-zinc-400 transition-colors hover:border-zinc-700 hover:text-zinc-300"
+                            className="border-border text-muted-foreground hover:text-foreground flex-1 rounded-lg border py-2.5 text-sm transition-colors"
                         >
                             Cancel
                         </button>
                         <button
-                            onClick={() => result?.product && onAdd(result.product)}
-                            disabled={!result?.valid}
+                            onClick={handleAdd}
+                            disabled={!result?.valid || adding}
                             className="flex-1 rounded-lg bg-blue-600 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
                         >
-                            Add Product
+                            {adding ? "Adding..." : "Add Product"}
                         </button>
                     </div>
                 </div>
@@ -256,17 +251,26 @@ function ProductCard({ product }: { product: Product }) {
 
     return (
         <Link
-            href={"/products/" + product.id}
-            className="group block overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900 transition-colors hover:border-zinc-700"
+            href={"/dashboard/products/" + product.id}
+            className="group border-border bg-card/40 hover:border-border/80 block overflow-hidden rounded-xl border transition-colors"
         >
-            {/* Cover landscape */}
-            <div className="relative h-36 overflow-hidden bg-zinc-800">
-                <img
-                    src={product.landscapeUrl}
-                    alt={product.name}
-                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                />
-                {/* Active badge */}
+            {/* Cover */}
+            <div className="bg-secondary/40 relative h-36 overflow-hidden">
+                {product.landscapeUrl ? (
+                    <img
+                        src={product.landscapeUrl}
+                        alt={product.name}
+                        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                    />
+                ) : (
+                    <div className="flex h-full items-center justify-center">
+                        <img
+                            src={product.thumbnailUrl}
+                            alt={product.name}
+                            className="h-16 w-16 rounded-xl object-cover"
+                        />
+                    </div>
+                )}
                 <div className="absolute top-3 right-3">
                     <span className="rounded-full border border-emerald-500/30 bg-emerald-500/20 px-2 py-0.5 text-xs text-emerald-400 backdrop-blur-sm">
                         Active
@@ -283,21 +287,21 @@ function ProductCard({ product }: { product: Product }) {
                         className="h-9 w-9 shrink-0 rounded-lg object-cover"
                     />
                     <div className="min-w-0 flex-1">
-                        <p className="line-clamp-2 text-sm leading-snug font-medium text-zinc-200 transition-colors group-hover:text-white">
+                        <p className="text-foreground line-clamp-2 text-sm leading-snug font-medium transition-colors group-hover:text-white">
                             {product.name}
                         </p>
-                        <p className="mt-0.5 text-xs text-zinc-600">
-                            {product.license} · {formatDate(product.purchaseDate)}
+                        <p className="text-muted-foreground mt-0.5 text-xs">
+                            {product.licenseType} · {formatDate(product.createdAt)}
                         </p>
                     </div>
                 </div>
 
                 {/* Purchase code */}
                 <div
-                    className="mt-3 flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
+                    className="border-border bg-secondary/20 mt-3 flex items-center gap-2 rounded-lg border px-3 py-2"
                     onClick={(e) => e.preventDefault()}
                 >
-                    <span className="flex-1 truncate font-mono text-xs text-zinc-500">
+                    <span className="text-muted-foreground flex-1 truncate font-mono text-xs">
                         {showCode ? product.purchaseCode : maskCode(product.purchaseCode)}
                     </span>
                     <button
@@ -306,7 +310,7 @@ function ProductCard({ product }: { product: Product }) {
                             e.preventDefault();
                             setShowCode(!showCode);
                         }}
-                        className="shrink-0 text-xs text-zinc-600 transition-colors hover:text-zinc-400"
+                        className="text-muted-foreground hover:text-foreground shrink-0 text-xs transition-colors"
                     >
                         {showCode ? "Hide" : "Show"}
                     </button>
@@ -318,15 +322,19 @@ function ProductCard({ product }: { product: Product }) {
 
 // ─── Main Page ───────────────────────────────────────────
 export default function ProductsPage() {
-    const [products, setProducts] = useState<Product[]>(mockProducts);
+    const [products, setProducts] = useState<Product[]>([]);
+    const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
 
-    function handleAddProduct(product: Product) {
-        setProducts((prev) => {
-            const exists = prev.find((p) => p.id === product.id);
-            return exists ? prev : [...prev, product];
-        });
-    }
+    useEffect(() => {
+        fetch("/api/products")
+            .then((r) => r.json())
+            .then((data) => {
+                setProducts(data.products ?? []);
+                setLoading(false);
+            })
+            .catch(() => setLoading(false));
+    }, []);
 
     return (
         <>
@@ -334,7 +342,12 @@ export default function ProductsPage() {
                 <AddProductModal
                     onClose={() => setShowModal(false)}
                     onAdd={(p) => {
-                        handleAddProduct(p);
+                        setProducts((prev) => {
+                            const exists = prev.find(
+                                (x) => x.id === p.id && x.purchaseCode === p.purchaseCode,
+                            );
+                            return exists ? prev : [...prev, p];
+                        });
                         setShowModal(false);
                     }}
                 />
@@ -344,8 +357,8 @@ export default function ProductsPage() {
                 {/* Header */}
                 <div className="flex items-center justify-between">
                     <div>
-                        <h1 className="text-2xl font-semibold text-white">My Products</h1>
-                        <p className="mt-0.5 text-sm text-zinc-500">
+                        <h1 className="text-foreground text-2xl font-semibold">My Products</h1>
+                        <p className="text-muted-foreground mt-0.5 text-sm">
                             {products.length} verified{" "}
                             {products.length === 1 ? "license" : "licenses"}
                         </p>
@@ -360,30 +373,27 @@ export default function ProductsPage() {
                 </div>
 
                 {/* Grid */}
-                {products.length > 0 ? (
+                {loading ? (
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                        {[1, 2, 3].map((i) => (
+                            <div
+                                key={i}
+                                className="border-border bg-card/40 h-64 animate-pulse rounded-xl border"
+                            />
+                        ))}
+                    </div>
+                ) : products.length > 0 ? (
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                         {products.map((product) => (
-                            <ProductCard key={product.id} product={product} />
+                            <ProductCard
+                                key={product.id + product.purchaseCode}
+                                product={product}
+                            />
                         ))}
                     </div>
                 ) : (
-                    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-zinc-800 py-16">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-800">
-                            <svg
-                                className="h-6 w-6 text-zinc-600"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                            >
-                                <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={1.5}
-                                    d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
-                                />
-                            </svg>
-                        </div>
-                        <p className="text-sm text-zinc-500">No products added yet</p>
+                    <div className="border-border flex flex-col items-center gap-3 rounded-xl border border-dashed py-16">
+                        <p className="text-muted-foreground text-sm">No products added yet</p>
                         <button
                             onClick={() => setShowModal(true)}
                             className="text-sm text-blue-400 transition-colors hover:text-blue-300"
